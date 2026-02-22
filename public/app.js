@@ -1341,8 +1341,8 @@ function showSummaryPromptButton() {
 
   if (state.summaryGenerated) {
     div.innerHTML = `
-      <button class="btn-summary-prompt" disabled style="opacity: 0.5; cursor: not-allowed;">
-        Summary Already Generated
+      <button class="btn-summary-prompt" id="summaryPromptBtn">
+        View Summary &amp; Action Items
       </button>`;
   } else {
     div.innerHTML = `
@@ -1354,9 +1354,7 @@ function showSummaryPromptButton() {
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 
-  if (!state.summaryGenerated) {
-    div.querySelector('#summaryPromptBtn').addEventListener('click', generateSummary);
-  }
+  div.querySelector('#summaryPromptBtn').addEventListener('click', generateSummary);
 }
 
 async function doSearch(query) {
@@ -1598,6 +1596,7 @@ function renderSummary(summary) {
 
 // === Export Functions ===
 function exportAsJson() {
+  const refs = collectReferences();
   const data = {
     topic: state.topic,
     agents: state.agents,
@@ -1611,6 +1610,7 @@ function exportAsJson() {
     searchCount: state.searchCount,
     summaryGenerated: state.summaryGenerated,
     summary: state.summaryData,
+    references: refs.map(r => ({ title: r.title, url: r.url, agent: r.agent })),
     exportedAt: new Date().toISOString()
   };
   downloadFile(`focus-group-${Date.now()}.json`, JSON.stringify(data, null, 2), 'application/json');
@@ -1653,6 +1653,14 @@ function exportAsMarkdown() {
     if (state.summaryData.dissent) {
       md += `### Unresolved Disagreements\n\n${state.summaryData.dissent}\n\n`;
     }
+  }
+
+  // References section
+  const refs = collectReferences();
+  if (refs.length > 0) {
+    md += `---\n\n## References\n\n`;
+    refs.forEach(r => { md += `- [${r.title}](${r.url}) — *${r.agent}*\n`; });
+    md += '\n';
   }
 
   downloadFile(`focus-group-${Date.now()}.md`, md, 'text/markdown');
@@ -1809,10 +1817,8 @@ function escapeHtmlWithLinks(str) {
   return renderMarkdown(str);
 }
 
-// === References Panel ===
-function updateReferencesPanel() {
-  const container = document.getElementById('referencesPanel');
-  if (!container) return;
+// === References ===
+function collectReferences() {
   const refs = [];
   const seen = new Set();
   for (const msg of state.messages) {
@@ -1835,6 +1841,13 @@ function updateReferencesPanel() {
       }
     }
   }
+  return refs;
+}
+
+function updateReferencesPanel() {
+  const container = document.getElementById('referencesPanel');
+  if (!container) return;
+  const refs = collectReferences();
   if (refs.length === 0) {
     container.innerHTML = '<div class="refs-empty">No references yet</div>';
     return;
