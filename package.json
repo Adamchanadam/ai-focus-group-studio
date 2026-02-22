@@ -1,0 +1,19 @@
+{
+  "name": "ai-focus-group-studio",
+  "version": "1.0.0",
+  "description": "AI Focus Group Studio - Multiple AI agents discuss and research topics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^4.21.0",
+    "openai": "^4.73.0",
+    "uuid": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

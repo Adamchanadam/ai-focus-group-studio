@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Focus Group Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">AI Focus Group</h1>
+        <span class="logo-sub">Studio</span>
+      </div>
+      <button class="new-session-btn" id="newSessionBtn">+ New Session</button>
+      <button class="import-session-btn" id="importBtn">Import Session</button>
+      <div class="session-list" id="sessionList">
+        <div class="session-list-empty">No saved sessions</div>
+      </div>
+      <div class="sidebar-divider"></div>
+      <div class="agent-library-section">
+        <div class="agent-library-header">
+          <h3>Agent Library</h3>
+          <button class="agent-lib-add-btn" id="createAgentBtn" title="Create Agent">+</button>
+        </div>
+        <div class="agent-library-list" id="agentLibraryList">
+          <div class="agent-lib-empty">No saved agents</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- VIEW: Setup -->
+      <section class="view active" id="viewSetup">
+        <div class="setup-container">
+          <div class="setup-hero">
+            <h2>Start a Focus Group</h2>
+            <p>AI agents with diverse perspectives will discuss your topic</p>
+            <div class="model-badge">Powered by <strong id="modelBadge">loading...</strong></div>
+          </div>
+
+          <div class="setup-form">
+            <div class="form-group">
+              <label for="topicInput">Discussion Topic</label>
+              <textarea id="topicInput" rows="3" maxlength="2000" placeholder="e.g., Should companies mandate return-to-office policies? What are the trade-offs of remote vs hybrid vs in-office work?"></textarea>
+            </div>
+
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label>Number of Agents</label>
+                <div class="stepper-control" id="agentCountStepper">
+                  <button class="stepper-btn stepper-minus" id="agentCountMinus" aria-label="Decrease agents">&minus;</button>
+                  <span class="stepper-value" id="agentCountValue">3</span>
+                  <button class="stepper-btn stepper-plus" id="agentCountPlus" aria-label="Increase agents">&plus;</button>
+                </div>
+                <span class="field-hint">2–5 agents per session</span>
+              </div>
+
+              <div class="form-group">
+                <label>Discussion Rounds</label>
+                <div class="stepper-control" id="roundStepper">
+                  <button class="stepper-btn stepper-minus" id="roundMinus" aria-label="Decrease rounds">&minus;</button>
+                  <span class="stepper-value" id="roundValue">3</span>
+                  <button class="stepper-btn stepper-plus" id="roundPlus" aria-label="Increase rounds">&plus;</button>
+                </div>
+                <span class="field-hint">1–5 rounds</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="goalInput">Goal / Success Measurement</label>
+              <textarea id="goalInput" rows="2" maxlength="1000" placeholder="e.g., Identify the top 3 barriers to adoption and at least 2 actionable solutions for each"></textarea>
+              <span class="field-hint">Define what a successful discussion looks like — this guides agent focus</span>
+            </div>
+
+            <div class="form-group">
+              <label for="focusGroupMode">Focus Group Mode</label>
+              <select id="focusGroupMode">
+                <option value="share_perspectives" selected>Share Perspectives</option>
+                <option value="brainstorm">Brainstorm New Ideas</option>
+                <option value="debate">Debate to Find Best Answer</option>
+              </select>
+              <span class="field-hint">Controls how agents interact during the discussion</span>
+            </div>
+
+            <div class="form-group">
+              <label class="toggle-label" for="webSearchToggle">
+                <span>Enable Web Search</span>
+                <span class="toggle-desc">Agents can search the web for real-time data</span>
+              </label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="webSearchToggle" checked role="switch" aria-label="Enable web search" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label for="sessionTimezone">Session Timezone</label>
+              <select id="sessionTimezone"></select>
+              <span class="field-hint">Defines the date/time context — agents will know "today's date"</span>
+            </div>
+
+            <div class="form-group">
+              <label>Panel Composition</label>
+              <div class="panel-comp-selector" id="panelCompSelector">
+                <button class="panel-comp-btn active" data-mode="generate">Generate New</button>
+                <button class="panel-comp-btn" data-mode="library">Pick from Library</button>
+                <button class="panel-comp-btn" data-mode="mix">Mix</button>
+              </div>
+              <span class="field-hint" id="panelCompHint">AI will generate all agents for this session</span>
+            </div>
+
+            <div class="agent-picker hidden" id="agentPicker">
+              <label>Select Agents from Library</label>
+              <div class="agent-picker-grid" id="agentPickerGrid"></div>
+              <div class="agent-picker-count" id="agentPickerCount">0 selected</div>
+            </div>
+
+            <button class="btn-primary" id="generateRolesBtn">Generate Roles</button>
+          </div>
+
+          <!-- Role editor (hidden until roles generated) -->
+          <div class="role-editor hidden" id="roleEditor">
+            <h3>Panel Members</h3>
+            <p class="role-editor-hint">Click any card to edit the agent's details</p>
+            <div class="role-cards" id="roleCards"></div>
+            <div class="role-actions">
+              <button class="btn-secondary" id="regenerateBtn">Regenerate All</button>
+              <button class="btn-secondary" id="saveToLibraryBtn">Save to Library</button>
+              <button class="btn-primary" id="prepareAgentsBtn">Prepare Agents — Research Topic</button>
+              <button class="btn-primary" id="startDiscussionBtn" disabled>Start Discussion</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: Discussion -->
+      <section class="view" id="viewDiscussion">
+        <div class="discussion-layout">
+          <!-- Chat area -->
+          <div class="chat-container">
+            <div class="chat-header">
+              <div class="chat-topic" id="chatTopic">Discussion Topic</div>
+              <div class="chat-controls">
+                <span class="round-indicator" id="roundIndicator">Round 1/3</span>
+                <button class="btn-icon" id="pauseBtn" title="Pause discussion" aria-label="Pause discussion">&#10074;&#10074;</button>
+                <button class="btn-icon" id="summaryBtn" title="Generate summary" aria-label="Generate summary">&#9634;</button>
+              </div>
+            </div>
+
+            <div class="chat-messages" id="chatMessages" role="log" aria-live="polite"></div>
+
+            <!-- User interjection bar -->
+            <div class="chat-input-bar">
+              <input type="text" id="userInput" placeholder="Interject: add your feedback or redirect the discussion..." />
+              <button class="btn-send" id="sendBtn" aria-label="Send message">Send</button>
+            </div>
+          </div>
+
+          <!-- Agent sidebar -->
+          <div class="agent-panel">
+            <h3>Panelists</h3>
+            <div class="agent-list-mini" id="agentListMini"></div>
+            <div class="search-panel">
+              <h4>Quick Search</h4>
+              <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="Search the web..." />
+                <button class="btn-icon" id="searchBtn" aria-label="Search the web">&#128269;</button>
+              </div>
+              <div class="search-results" id="searchResults"></div>
+            </div>
+            <div class="references-panel">
+              <h4>References</h4>
+              <div class="references-list" id="referencesPanel">
+                <div class="refs-empty">No references yet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW: Summary Modal -->
+      <div class="modal-overlay hidden" id="summaryModal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="summaryModalTitle">
+          <div class="modal-header">
+            <h2 id="summaryModalTitle">Discussion Summary</h2>
+            <button class="modal-close" id="closeSummaryBtn" aria-label="Close summary">&times;</button>
+          </div>
+          <div class="modal-body" id="summaryContent">
+            <div class="loading-spinner">Generating summary...</div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="exportJsonBtn">Export JSON</button>
+            <button class="btn-secondary" id="exportMdBtn">Export Markdown</button>
+            <button class="btn-primary" id="closeSummaryDoneBtn">Done</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Role Edit Modal -->
+      <div class="modal-overlay hidden" id="roleEditModal">
+        <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="roleEditModalTitle">
+          <div class="modal-header">
+            <h2 id="roleEditModalTitle">Edit Agent</h2>
+            <button class="modal-close" id="closeRoleEditBtn" aria-label="Close editor">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="editName" />
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <input type="text" id="editRole" />
+            </div>
+            <div class="form-group">
+              <label>Background</label>
+              <textarea id="editBackground" rows="2"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Perspective</label>
+              <input type="text" id="editPerspective" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="cancelRoleEditBtn">Cancel</button>
+            <button class="btn-primary" id="saveRoleEditBtn">Save</button>
+          </div>
+        </div>
+      </div>
+      <!-- Agent Profile Modal (discussion view) -->
+      <div class="modal-overlay hidden" id="agentProfileModal">
+        <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="agentProfileTitle">
+          <div class="modal-header">
+            <div class="agent-profile-header">
+              <div class="agent-profile-avatar" id="agentProfileAvatar"></div>
+              <div>
+                <h2 id="agentProfileTitle">Agent Name</h2>
+                <div class="agent-profile-role" id="agentProfileRole"></div>
+              </div>
+            </div>
+            <button class="modal-close" id="closeAgentProfileBtn" aria-label="Close profile">&times;</button>
+          </div>
+          <div class="modal-body" id="agentProfileBody">
+            <div class="agent-profile-section">
+              <div class="agent-profile-label">Background</div>
+              <div id="agentProfileBackground"></div>
+            </div>
+            <div class="agent-profile-section">
+              <div class="agent-profile-label">Perspective</div>
+              <div id="agentProfilePerspective"></div>
+            </div>
+            <div class="agent-profile-section" id="agentProfileBriefSection">
+              <div class="agent-profile-label">Research Brief</div>
+              <div class="agent-profile-brief" id="agentProfileBrief"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-primary" id="closeAgentProfileDoneBtn">Close</button>
+          </div>
+        </div>
+      </div>
+      <!-- Create/Edit Agent Modal -->
+      <div class="modal-overlay hidden" id="createAgentModal">
+        <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="createAgentModalTitle">
+          <div class="modal-header">
+            <h2 id="createAgentModalTitle">Create Agent</h2>
+            <button class="modal-close" id="closeCreateAgentBtn" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="createAgentName" placeholder="e.g., Dr. Sarah Chen" />
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <input type="text" id="createAgentRole" placeholder="e.g., AI Ethics Researcher" />
+            </div>
+            <div class="form-group">
+              <label>Background</label>
+              <textarea id="createAgentBackground" rows="2" placeholder="Professional background relevant to discussions"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Perspective</label>
+              <input type="text" id="createAgentPerspective" placeholder="e.g., cautious advocate" />
+            </div>
+            <div class="form-group">
+              <label>Color</label>
+              <div class="color-picker" id="createAgentColorPicker">
+                <button class="color-swatch active" data-color="#4CAF50" style="background:#4CAF50"></button>
+                <button class="color-swatch" data-color="#2196F3" style="background:#2196F3"></button>
+                <button class="color-swatch" data-color="#FF9800" style="background:#FF9800"></button>
+                <button class="color-swatch" data-color="#9C27B0" style="background:#9C27B0"></button>
+                <button class="color-swatch" data-color="#E91E63" style="background:#E91E63"></button>
+                <button class="color-swatch" data-color="#00BCD4" style="background:#00BCD4"></button>
+                <button class="color-swatch" data-color="#FF5722" style="background:#FF5722"></button>
+                <button class="color-swatch" data-color="#607D8B" style="background:#607D8B"></button>
+                <button class="color-swatch" data-color="#795548" style="background:#795548"></button>
+                <button class="color-swatch" data-color="#3F51B5" style="background:#3F51B5"></button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="cancelCreateAgentBtn">Cancel</button>
+            <button class="btn-primary" id="saveCreateAgentBtn">Save Agent</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Library Detail Modal -->
+      <div class="modal-overlay hidden" id="agentLibDetailModal">
+        <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="agentLibDetailTitle">
+          <div class="modal-header">
+            <div class="agent-profile-header">
+              <div class="agent-profile-avatar" id="agentLibDetailAvatar"></div>
+              <div>
+                <h2 id="agentLibDetailTitle">Agent Name</h2>
+                <div class="agent-profile-role" id="agentLibDetailRole"></div>
+              </div>
+            </div>
+            <button class="modal-close" id="closeAgentLibDetailBtn" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="agent-profile-section">
+              <div class="agent-profile-label">Background</div>
+              <div id="agentLibDetailBackground"></div>
+            </div>
+            <div class="agent-profile-section">
+              <div class="agent-profile-label">Perspective</div>
+              <div id="agentLibDetailPerspective"></div>
+            </div>
+            <div class="agent-profile-section">
+              <div class="agent-profile-label">Sessions</div>
+              <div id="agentLibDetailSessions">0 sessions</div>
+            </div>
+            <div class="agent-profile-section" id="agentLibDetailInsightsSection">
+              <div class="agent-profile-label insights-label-row">
+                <span>Accumulated Insights</span>
+                <button class="insights-edit-btn" id="insightsEditBtn" title="Edit insights">&#9998;</button>
+              </div>
+              <div class="agent-profile-brief" id="agentLibDetailInsights"></div>
+              <div class="insights-empty-hint hidden" id="insightsEmptyHint">No accumulated insights yet — this agent will learn from discussions.</div>
+              <div class="insights-edit-area hidden" id="insightsEditArea">
+                <textarea id="insightsEditTextarea" rows="6" placeholder="Manually enter or edit this agent's accumulated knowledge..."></textarea>
+                <div class="insights-edit-actions">
+                  <button class="btn-secondary btn-sm" id="insightsEditCancelBtn">Cancel</button>
+                  <button class="btn-secondary btn-sm btn-danger-outline" id="insightsClearBtn">Clear All</button>
+                  <button class="btn-primary btn-sm" id="insightsEditSaveBtn">Save</button>
+                </div>
+              </div>
+            </div>
+            <div class="agent-profile-section" id="agentLibDetailTopicsSection">
+              <div class="agent-profile-label">Topics Discussed</div>
+              <div class="agent-lib-topics" id="agentLibDetailTopics"></div>
+            </div>
+            <div class="agent-profile-section" id="agentLibDetailSourcesSection" style="display:none">
+              <div class="agent-profile-label">Knowledge Sources</div>
+              <div class="agent-lib-sources" id="agentLibDetailSources"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary btn-danger-outline" id="deleteAgentLibBtn">Delete</button>
+            <button class="btn-secondary" id="editAgentLibBtn">Edit</button>
+            <button class="btn-primary" id="closeAgentLibDetailDoneBtn">Close</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
