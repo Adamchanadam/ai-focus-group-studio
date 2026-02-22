@@ -87,14 +87,22 @@
             </div>
 
             <div class="form-group">
-              <label class="toggle-label" for="webSearchToggle">
-                <span>Enable Web Search</span>
-                <span class="toggle-desc">Agents can search the web for real-time data</span>
-              </label>
-              <label class="toggle-switch">
-                <input type="checkbox" id="webSearchToggle" checked role="switch" aria-label="Enable web search" />
-                <span class="toggle-slider"></span>
-              </label>
+              <label for="searchProvider">Web Search Provider</label>
+              <select id="searchProvider">
+                <option value="openai">OpenAI Web Search</option>
+                <option value="none">Disabled</option>
+              </select>
+              <span class="field-hint" id="searchProviderHint">Agents can search the web for real-time data</span>
+            </div>
+
+            <div class="form-group" id="searchCountGroup">
+              <label>Search Results per Query</label>
+              <div class="stepper-control" id="searchCountStepper">
+                <button class="stepper-btn stepper-minus" id="searchCountMinus" aria-label="Decrease search count">&minus;</button>
+                <span class="stepper-value" id="searchCountValue">5</span>
+                <button class="stepper-btn stepper-plus" id="searchCountPlus" aria-label="Increase search count">&plus;</button>
+              </div>
+              <span class="field-hint">3–10 results per search query</span>
             </div>
 
             <div class="form-group">
@@ -166,6 +174,11 @@
             <div class="agent-list-mini" id="agentListMini"></div>
             <div class="search-panel">
               <h4>Quick Search</h4>
+              <div class="search-provider-select">
+                <select id="sidebarSearchProvider">
+                  <option value="brave">Brave Search</option>
+                </select>
+              </div>
               <div class="search-bar">
                 <input type="text" id="searchInput" placeholder="Search the web..." />
                 <button class="btn-icon" id="searchBtn" aria-label="Search the web">&#128269;</button>

@@ -1026,6 +1026,21 @@ select {
   border-left: 3px solid var(--accent);
 }
 
+/* === Search Provider Select (sidebar) === */
+.search-provider-select {
+  margin-bottom: 6px;
+}
+
+.search-provider-select select {
+  font-size: 0.8rem;
+  padding: 4px 24px 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  width: 100%;
+}
+
 /* === Search Panel === */
 .search-bar {
   display: flex;

@@ -173,7 +173,7 @@ ${CONTEXT_AWARENESS_INSTRUCTIONS}`
 
 // Build the discussion system prompt for an agent
 function buildAgentSystemPrompt(agent, topic, allAgents, options = {}) {
-  const { goalMeasurement, focusGroupMode, webSearchEnabled, round, totalRounds, positionBrief, accumulatedInsights, sessionTimezone } = options;
+  const { goalMeasurement, focusGroupMode, webSearchEnabled, round, totalRounds, positionBrief, accumulatedInsights, sessionTimezone, searchProvider, searchContext } = options;
 
   const otherAgents = allAgents
     .filter(a => a.name !== agent.name)
@@ -188,7 +188,16 @@ function buildAgentSystemPrompt(agent, topic, allAgents, options = {}) {
   }
 
   let citationInstructions = '';
-  if (webSearchEnabled) {
+  const isExternalProvider = searchProvider && searchProvider !== 'openai' && searchProvider !== 'none';
+  if (isExternalProvider && searchContext) {
+    citationInstructions = `\nWeb Research (Pre-loaded):
+- Research results have been pre-loaded below for your reference
+- Cite sources using inline links: [source title](url)
+- Draw on both the research results AND your own expertise
+- You do NOT need to cite every source — use what's relevant to your argument
+
+${searchContext}`;
+  } else if (webSearchEnabled && !isExternalProvider) {
     citationInstructions = `\nWeb Search (Available):
 - You have access to web search for finding real data, statistics, or sources
 - Use web search ONLY when you need to verify a claim, cite a specific statistic, or find current data
@@ -285,52 +294,212 @@ ${positionBrief}
 Draw from these notes naturally during discussion. You don't need to mention everything — use what's relevant to the current conversation flow.` : ''}`;
 }
 
-// Perform web search (Brave or mock)
-async function performSearch(query) {
-  const braveKey = process.env.BRAVE_SEARCH_API_KEY;
+// === Pluggable Web Search Providers ===
 
-  if (braveKey) {
-    try {
-      const response = await fetch(
-        `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5`,
-        { headers: { 'X-Subscription-Token': braveKey } }
-      );
-      const data = await response.json();
-      return {
-        results: (data.web?.results || []).map(r => ({
-          title: r.title,
-          url: r.url,
-          description: r.description
-        })),
-        source: 'brave'
-      };
-    } catch (err) {
-      console.error('Brave search error:', err.message);
-      return { results: [], source: 'brave-error' };
-    }
+// Brave Search
+async function searchBrave(query, count = 5) {
+  const braveKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!braveKey) {
+    return { results: [], source: 'brave-no-key' };
+  }
+  try {
+    const response = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}`,
+      { headers: { 'X-Subscription-Token': braveKey } }
+    );
+    const data = await response.json();
+    return {
+      results: (data.web?.results || []).map(r => ({
+        title: r.title,
+        url: r.url,
+        description: r.description
+      })),
+      source: 'brave'
+    };
+  } catch (err) {
+    console.error('Brave search error:', err.message);
+    return { results: [], source: 'brave-error' };
+  }
+}
+
+// Exa.ai Search
+async function searchExa(query, count = 5) {
+  const exaKey = process.env.EXA_API_KEY;
+  if (!exaKey) {
+    return { results: [], source: 'exa-no-key' };
+  }
+  try {
+    const response = await fetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': exaKey
+      },
+      body: JSON.stringify({
+        query,
+        numResults: count,
+        type: 'neural',
+        useAutoprompt: true,
+        contents: { text: { maxCharacters: 300 } }
+      })
+    });
+    const data = await response.json();
+    return {
+      results: (data.results || []).map(r => ({
+        title: r.title || r.url,
+        url: r.url,
+        description: r.text || r.highlight || ''
+      })),
+      source: 'exa'
+    };
+  } catch (err) {
+    console.error('Exa search error:', err.message);
+    return { results: [], source: 'exa-error' };
+  }
+}
+
+// Firecrawl Search
+async function searchFirecrawl(query, count = 5) {
+  const firecrawlKey = process.env.FIRECRAWL_API_KEY;
+  if (!firecrawlKey) {
+    return { results: [], source: 'firecrawl-no-key' };
+  }
+  try {
+    // Firecrawl v2 API: https://docs.firecrawl.dev/api-reference/endpoint/search
+    const response = await fetch('https://api.firecrawl.dev/v2/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${firecrawlKey}`
+      },
+      body: JSON.stringify({
+        query,
+        limit: count
+      })
+    });
+    const data = await response.json();
+    // v2 response: { success, data: { web: [...], images: [...], news: [...] } }
+    const webResults = data.data?.web || data.data || [];
+    const results = Array.isArray(webResults) ? webResults : [];
+    return {
+      results: results.map(r => ({
+        title: r.title || r.metadata?.title || r.url,
+        url: r.url,
+        description: r.description || r.metadata?.description || ''
+      })),
+      source: 'firecrawl'
+    };
+  } catch (err) {
+    console.error('Firecrawl search error:', err.message);
+    return { results: [], source: 'firecrawl-error' };
+  }
+}
+
+// Unified search dispatcher
+async function performWebSearch(query, provider, { count = 5 } = {}) {
+  switch (provider) {
+    case 'exa': return searchExa(query, count);
+    case 'firecrawl': return searchFirecrawl(query, count);
+    case 'brave': return searchBrave(query, count);
+    default: return searchBrave(query, count);
+  }
+}
+
+// Format search results into a context block for Chat Completions injection
+function buildSearchContext(searchResults) {
+  if (!searchResults || searchResults.length === 0) {
+    return { contextText: '', sources: [] };
   }
 
-  // Mock search results
-  return {
-    results: [
-      {
-        title: `Research on: ${query}`,
-        url: `https://example.com/research/${encodeURIComponent(query)}`,
-        description: `Comprehensive analysis and findings related to "${query}". Mock result - set BRAVE_SEARCH_API_KEY for real search.`
-      },
-      {
-        title: `${query} - Industry Report 2025`,
-        url: `https://example.com/report/${encodeURIComponent(query)}`,
-        description: `Latest industry data and trends for "${query}". Mock result.`
-      },
-      {
-        title: `Expert Analysis: ${query}`,
-        url: `https://example.com/analysis/${encodeURIComponent(query)}`,
-        description: `Expert perspectives and data-driven insights on "${query}". Mock result.`
-      }
-    ],
-    source: 'mock'
-  };
+  const sources = [];
+  const blocks = [];
+
+  for (const result of searchResults) {
+    const { query, provider, results } = result;
+    if (!results || results.length === 0) continue;
+
+    const lines = [`--- Search: "${query}" (via ${provider}) ---`];
+    for (const r of results) {
+      lines.push(`[${r.title}](${r.url})`);
+      if (r.description) lines.push(r.description);
+      lines.push('');
+      sources.push({ url: r.url, title: r.title });
+    }
+    blocks.push(lines.join('\n'));
+  }
+
+  if (blocks.length === 0) {
+    return { contextText: '', sources: [] };
+  }
+
+  const contextText = `WEB RESEARCH RESULTS (cite with [title](url)):\n\n${blocks.join('\n')}`;
+  return { contextText, sources };
+}
+
+// Generate 1-3 search queries for agent pre-research (lightweight LLM call)
+async function generateSearchQueries(agent, topic, { goalMeasurement } = {}) {
+  try {
+    const client = getClient();
+    const response = await client.chat.completions.create({
+      model: OPENAI_MODEL,
+      max_completion_tokens: 2000,
+      reasoning_effort: 'low',
+      messages: [
+        {
+          role: 'system',
+          content: 'You generate concise web search queries. Respond with a JSON array of 1-3 search query strings. No explanation.'
+        },
+        {
+          role: 'user',
+          content: `Role: ${agent.name} (${agent.role}, perspective: ${agent.perspective})
+Topic: "${topic}"${goalMeasurement ? `\nGoal: ${goalMeasurement}` : ''}
+
+Generate 1-3 targeted search queries this expert would use to research this topic. Each query should focus on a different angle relevant to their expertise.`
+        }
+      ]
+    });
+    const text = response.choices[0].message.content.trim();
+    try {
+      const match = text.match(/\[[\s\S]*\]/);
+      return JSON.parse(match ? match[0] : text);
+    } catch {
+      // Fallback: split by newline, clean up
+      return text.split('\n').map(l => l.replace(/^[\d."'\-\s]+/, '').trim()).filter(Boolean).slice(0, 3);
+    }
+  } catch (err) {
+    console.error('generateSearchQueries error:', err.message);
+    return [`${topic} ${agent.role}`];
+  }
+}
+
+// Generate a single search query for mid-discussion use
+async function generateDiscussionSearchQuery(agent, topic, recentContext) {
+  try {
+    const client = getClient();
+    const response = await client.chat.completions.create({
+      model: OPENAI_MODEL,
+      max_completion_tokens: 1000,
+      reasoning_effort: 'low',
+      messages: [
+        {
+          role: 'system',
+          content: 'You generate a single concise web search query. Respond with just the query string, no quotes or explanation.'
+        },
+        {
+          role: 'user',
+          content: `Role: ${agent.name} (${agent.role})
+Topic: "${topic}"
+Recent discussion context: ${(recentContext || '').substring(0, 500)}
+
+Generate one search query to find data or evidence relevant to what this expert would contribute next.`
+        }
+      ]
+    });
+    return response.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+  } catch (err) {
+    console.error('generateDiscussionSearchQuery error:', err.message);
+    return `${topic} ${agent.role}`;
+  }
 }
 
 // === Input Validation ===
@@ -405,7 +574,8 @@ app.post('/api/discuss', async (req, res) => {
       const client = getClient();
       const response = await client.chat.completions.create({
         model: OPENAI_MODEL,
-        max_completion_tokens: 2000,
+        max_completion_tokens: 8000,
+        reasoning_effort: 'low',
         messages: [
           { role: 'system', content: 'You are a focus group design assistant. Respond only with valid JSON arrays.' },
           { role: 'user', content: buildRoleGenerationPrompt(topic, toGenerate) }
@@ -464,18 +634,23 @@ app.post('/api/discuss', async (req, res) => {
 
 // POST /api/agent/prepare - Generate agent's position brief with research
 app.post('/api/agent/prepare', async (req, res) => {
-  const { sessionId, agentIndex, agents, topic, goalMeasurement, webSearchEnabled } = req.body;
+  const { sessionId, agentIndex, agents, topic, goalMeasurement, webSearchEnabled, searchProvider, searchCount } = req.body;
 
   if (!topic || !Array.isArray(agents) || typeof agentIndex !== 'number' || agentIndex >= agents.length) {
     return res.status(400).json({ error: 'Invalid request' });
   }
 
   const agent = agents[agentIndex];
+  // Determine effective provider: explicit param > legacy toggle > 'none'
+  const effectiveProvider = searchProvider || (webSearchEnabled ? 'openai' : 'none');
+  const isExternalProvider = effectiveProvider !== 'openai' && effectiveProvider !== 'none';
+  const effectiveSearchEnabled = effectiveProvider !== 'none';
+  const count = searchCount || 5;
 
   const prepPrompt = `The upcoming discussion topic is: "${topic}"${goalMeasurement ? `\nGoal: ${goalMeasurement}` : ''}
 
 Before the discussion, do your homework:
-1. ${webSearchEnabled ? 'Search for recent data, statistics, or news about this topic relevant to your expertise.' : 'Draw on your domain expertise.'}
+1. ${effectiveSearchEnabled ? 'Review the research data provided and augment with your domain expertise.' : 'Draw on your domain expertise.'}
 2. Then write a brief PRIVATE position note (4-6 bullet points) covering:
    - Your initial stance and WHY — grounded in specific evidence
    - 2-3 concrete data points, case studies, or real-world examples you'll reference
@@ -488,8 +663,33 @@ Keep it concise. These are your private preparation notes. Write in first person
     const client = getClient();
     let brief = '';
 
-    if (webSearchEnabled) {
-      // Use Responses API with web_search for real research
+    if (isExternalProvider) {
+      // External provider path: generate queries → search → inject context → Chat Completions
+      const queries = await generateSearchQueries(agent, topic, { goalMeasurement });
+      const searchResults = [];
+      for (const q of queries) {
+        const result = await performWebSearch(q, effectiveProvider, { count });
+        searchResults.push({ query: q, provider: effectiveProvider, results: result.results });
+      }
+      const { contextText } = buildSearchContext(searchResults);
+
+      const systemContent = `You are ${agent.name}, a ${agent.role}. Background: ${agent.background}. Perspective: ${agent.perspective}.
+
+You are preparing for a focus group discussion. Research results have been pre-loaded for your reference. Combine these with your own expertise to form your position.${contextText ? '\n\n' + contextText : ''}`;
+
+      const response = await client.chat.completions.create({
+        model: OPENAI_MODEL,
+        max_completion_tokens: 8000,
+        reasoning_effort: 'low',
+        messages: [
+          { role: 'system', content: systemContent },
+          { role: 'user', content: prepPrompt }
+        ]
+      });
+      brief = response.choices[0].message.content.trim();
+
+    } else if (effectiveProvider === 'openai') {
+      // OpenAI Responses API with web_search (existing path)
       const response = await client.responses.create({
         model: OPENAI_MODEL,
         instructions: `You are ${agent.name}, a ${agent.role}. Background: ${agent.background}. Perspective: ${agent.perspective}.
@@ -499,7 +699,6 @@ You are preparing for a focus group discussion. Research the topic thoroughly us
         tools: [{ type: 'web_search' }]
       });
 
-      // Extract text from response
       if (response.output) {
         for (const item of response.output) {
           if (item.type === 'message' && item.content) {
@@ -512,11 +711,11 @@ You are preparing for a focus group discussion. Research the topic thoroughly us
         }
       }
     } else {
-      // Use chat completions without web search
+      // No search — Chat Completions only
       const response = await client.chat.completions.create({
         model: OPENAI_MODEL,
-        max_completion_tokens: 600,
-        // temperature removed — gpt-5-mini only supports default (1)
+        max_completion_tokens: 8000,
+        reasoning_effort: 'low',
         messages: [
           {
             role: 'system',
@@ -546,7 +745,7 @@ You are preparing for a focus group discussion. Organize your thoughts based on 
 
 // POST /api/agent/respond - Get a single agent's response (SSE streaming)
 app.post('/api/agent/respond', async (req, res) => {
-  const { sessionId, agentIndex, agents, topic, messages, userInterjection, webSearchEnabled, goalMeasurement, focusGroupMode, round, totalRounds, sessionTimezone } = req.body;
+  const { sessionId, agentIndex, agents, topic, messages, userInterjection, webSearchEnabled, goalMeasurement, focusGroupMode, round, totalRounds, sessionTimezone, searchProvider, searchCount } = req.body;
 
   const agentValidationError = validateAgentRespondRequest(req.body);
   if (agentValidationError) {
@@ -629,10 +828,39 @@ Open with what strikes you most about this topic, then develop your argument wit
       || (sessionId && sessions.has(sessionId) ? sessions.get(sessionId).sessionTimezone : null)
       || 'UTC';
 
-    const promptOptions = { goalMeasurement, focusGroupMode, webSearchEnabled, round, totalRounds, positionBrief, accumulatedInsights, sessionTimezone: resolvedTimezone };
+    // Determine effective provider
+    const effectiveProvider = searchProvider || (webSearchEnabled ? 'openai' : 'none');
+    const isExternalProvider = effectiveProvider !== 'openai' && effectiveProvider !== 'none';
+    const effectiveSearchEnabled = effectiveProvider !== 'none';
+    const count = searchCount || 5;
 
-    if (webSearchEnabled) {
-      // Use Responses API with web_search tool
+    // For external providers, pre-search and inject context
+    let searchContext = '';
+    let externalSources = [];
+    if (isExternalProvider) {
+      try {
+        const recentContext = (messages || []).slice(-3).map(m => m.content || '').join(' ').substring(0, 500);
+        const query = await generateDiscussionSearchQuery(agent, topic, recentContext);
+        const result = await performWebSearch(query, effectiveProvider, { count });
+        const ctx = buildSearchContext([{ query, provider: effectiveProvider, results: result.results }]);
+        searchContext = ctx.contextText;
+        externalSources = ctx.sources;
+      } catch (err) {
+        console.warn('External search failed, continuing without:', err.message);
+      }
+    }
+
+    const promptOptions = {
+      goalMeasurement, focusGroupMode,
+      webSearchEnabled: effectiveSearchEnabled,
+      round, totalRounds, positionBrief, accumulatedInsights,
+      sessionTimezone: resolvedTimezone,
+      searchProvider: effectiveProvider,
+      searchContext
+    };
+
+    if (effectiveProvider === 'openai') {
+      // Use Responses API with web_search tool (existing OpenAI path)
       const stream = await client.responses.create({
         model: OPENAI_MODEL,
         instructions: buildAgentSystemPrompt(agent, topic, agents, promptOptions),
@@ -647,7 +875,6 @@ Open with what strikes you most about this topic, then develop your argument wit
             fullText += event.delta;
             res.write(`data: ${JSON.stringify({ type: 'chunk', content: event.delta })}\n\n`);
           } else if (event.type === 'response.completed') {
-            // Extract citations from completed response
             const response = event.response;
             if (response && response.output) {
               for (const item of response.output) {
@@ -685,10 +912,11 @@ Open with what strikes you most about this topic, then develop your argument wit
         res.end();
       }
     } else {
-      // Use chat.completions without web search
+      // Chat Completions path (external provider with injected context, or no search)
       const stream = await client.chat.completions.create({
         model: OPENAI_MODEL,
-        max_completion_tokens: 1000,
+        max_completion_tokens: 16384,
+        reasoning_effort: 'low',
         stream: true,
         messages: [
           { role: 'system', content: buildAgentSystemPrompt(agent, topic, agents, promptOptions) },
@@ -705,6 +933,9 @@ Open with what strikes you most about this topic, then develop your argument wit
           }
         }
 
+        // Use external sources if available
+        sources = externalSources;
+
         if (sessionId && sessions.has(sessionId)) {
           const session = sessions.get(sessionId);
           session.messages.push({
@@ -712,12 +943,12 @@ Open with what strikes you most about this topic, then develop your argument wit
             agentRole: agent.role,
             agentColor: agent.color,
             content: fullText,
-            sources: [],
+            sources: sources,
             timestamp: new Date().toISOString()
           });
         }
 
-        res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, sources: [] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', content: fullText, sources })}\n\n`);
         res.end();
       } catch (err) {
         console.error('Stream error:', err.message);
@@ -731,15 +962,17 @@ Open with what strikes you most about this topic, then develop your argument wit
   }
 });
 
-// POST /api/search - Web search
+// POST /api/search - Web search (sidebar quick search)
 app.post('/api/search', async (req, res) => {
-  const { query } = req.body;
+  const { query, provider, count } = req.body;
 
   if (!query) {
     return res.status(400).json({ error: 'query is required' });
   }
 
-  const result = await performSearch(query);
+  const effectiveProvider = provider || 'brave';
+  const effectiveCount = count || 5;
+  const result = await performWebSearch(query, effectiveProvider, { count: effectiveCount });
   res.json(result);
 });
 
@@ -793,8 +1026,8 @@ app.post('/api/summary', async (req, res) => {
 
     const stream = await client.chat.completions.create({
       model: OPENAI_MODEL,
-      max_completion_tokens: 4096,
-      // temperature removed — gpt-5-mini only supports default (1)
+      max_completion_tokens: 16384,
+      reasoning_effort: 'low',
       store: false,
       stream: true,
       messages: [
@@ -874,7 +1107,23 @@ app.get('/api/session/:id', (req, res) => {
 
 // GET /api/config - Public configuration
 app.get('/api/config', (req, res) => {
-  res.json({ model: OPENAI_MODEL });
+  const providers = [
+    { id: 'openai', name: 'OpenAI Web Search', available: true },
+    { id: 'exa', name: 'Exa.ai', available: !!process.env.EXA_API_KEY },
+    { id: 'firecrawl', name: 'Firecrawl', available: !!process.env.FIRECRAWL_API_KEY },
+    { id: 'brave', name: 'Brave Search', available: !!process.env.BRAVE_SEARCH_API_KEY },
+    { id: 'none', name: 'Disabled', available: true }
+  ];
+
+  // Default: first available external provider, otherwise openai
+  const availableExternal = providers.filter(p => p.available && p.id !== 'openai' && p.id !== 'none');
+  const defaultProvider = availableExternal.length > 0 ? availableExternal[0].id : 'openai';
+
+  res.json({
+    model: OPENAI_MODEL,
+    searchProviders: providers,
+    defaultSearchProvider: defaultProvider
+  });
 });
 
 // DELETE /api/session/:id - Delete session
@@ -961,8 +1210,8 @@ app.post('/api/agents/:id/learn', async (req, res) => {
 
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
-      max_completion_tokens: 600,
-      // temperature removed — gpt-5-mini only supports default (1)
+      max_completion_tokens: 4000,
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: 'You are a knowledge management assistant. Merge and condense expertise summaries. Respond with the merged text only, no JSON or markdown.' },
         { role: 'user', content: mergePrompt }
@@ -1018,8 +1267,11 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`\nAI Focus Group Studio running at http://0.0.0.0:${PORT}\n`);
   console.log(`  Model: ${OPENAI_MODEL}`);
   console.log(`  API Key: ${process.env.OPENAI_API_KEY ? 'configured' : 'MISSING - set OPENAI_API_KEY'}`);
-  console.log(`  Agent Web Search: OpenAI Responses API (web_search tool, toggled per session)`);
-  console.log(`  Quick Search: ${process.env.BRAVE_SEARCH_API_KEY ? 'Brave Search (live)' : 'mock mode (set BRAVE_SEARCH_API_KEY for real search)'}`);
+  console.log(`  Search Providers:`);
+  console.log(`    OpenAI:    always available (Responses API)`);
+  console.log(`    Exa.ai:    ${process.env.EXA_API_KEY ? 'configured' : 'not configured (set EXA_API_KEY)'}`);
+  console.log(`    Firecrawl: ${process.env.FIRECRAWL_API_KEY ? 'configured' : 'not configured (set FIRECRAWL_API_KEY)'}`);
+  console.log(`    Brave:     ${process.env.BRAVE_SEARCH_API_KEY ? 'configured' : 'not configured (set BRAVE_SEARCH_API_KEY)'}`);
   console.log(`  Persistent Agents: ${agentStore.getAll().length} loaded`);
   console.log('');
 });

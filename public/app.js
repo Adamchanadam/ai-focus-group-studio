@@ -19,6 +19,11 @@ const state = {
   goalMeasurement: '',
   focusGroupMode: 'share_perspectives',
   sessionTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  // Search Provider
+  searchProvider: 'openai',       // 'openai' | 'exa' | 'firecrawl' | 'brave' | 'none'
+  searchCount: 5,                 // 3-10
+  availableProviders: [],         // from /api/config
+  sidebarSearchProvider: 'brave', // default for sidebar quick search
   // Agent Library
   agentLibrary: [],
   panelCompMode: 'generate',   // 'generate' | 'library' | 'mix'
@@ -62,7 +67,9 @@ function saveCurrentSession() {
     currentRound: state.currentRound,
     summaryData: state.summaryData,
     summaryGenerated: state.summaryGenerated,
-    webSearchEnabled: state.webSearchEnabled,
+    webSearchEnabled: state.searchProvider !== 'none',
+    searchProvider: state.searchProvider,
+    searchCount: state.searchCount,
     goalMeasurement: state.goalMeasurement,
     focusGroupMode: state.focusGroupMode,
     sessionTimezone: state.sessionTimezone,
@@ -103,6 +110,8 @@ function loadSession(id) {
   state.summaryData = session.summaryData || null;
   state.summaryGenerated = session.summaryGenerated || false;
   state.webSearchEnabled = session.webSearchEnabled !== false;
+  state.searchProvider = session.searchProvider || (session.webSearchEnabled !== false ? 'openai' : 'none');
+  state.searchCount = session.searchCount || 5;
   state.goalMeasurement = session.goalMeasurement || '';
   state.focusGroupMode = session.focusGroupMode || 'share_perspectives';
   state.sessionTimezone = session.sessionTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -848,7 +857,9 @@ async function retrySingleAgent(agent, agentIndex, interjection) {
         topic: state.topic,
         messages: state.messages.filter(m => m.type !== 'system'),
         userInterjection: interjection || null,
-        webSearchEnabled: state.webSearchEnabled,
+        webSearchEnabled: state.searchProvider !== 'none',
+        searchProvider: state.searchProvider,
+        searchCount: state.searchCount,
         goalMeasurement: state.goalMeasurement,
         focusGroupMode: state.focusGroupMode,
         sessionTimezone: state.sessionTimezone
@@ -1002,7 +1013,9 @@ async function prepareAgents() {
         agents: state.agents,
         topic: state.topic,
         goalMeasurement: state.goalMeasurement,
-        webSearchEnabled: state.webSearchEnabled
+        webSearchEnabled: state.searchProvider !== 'none',
+        searchProvider: state.searchProvider,
+        searchCount: state.searchCount
       })
     })
     .then(r => r.json())
@@ -1185,7 +1198,9 @@ async function runDiscussion() {
             topic: state.topic,
             messages: messagesToSend,
             userInterjection: interjection,
-            webSearchEnabled: state.webSearchEnabled,
+            webSearchEnabled: state.searchProvider !== 'none',
+            searchProvider: state.searchProvider,
+            searchCount: state.searchCount,
             goalMeasurement: state.goalMeasurement,
             focusGroupMode: state.focusGroupMode,
             sessionTimezone: state.sessionTimezone,
@@ -1272,6 +1287,33 @@ async function runDiscussion() {
   });
 
   showSummaryPromptButton();
+
+  // Auto-save new agents to library after discussion completes
+  const unsavedAgents = state.agents.filter(a => !a.id);
+  if (unsavedAgents.length > 0) {
+    try {
+      const res = await fetch('/api/agents/save-from-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agents: unsavedAgents })
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        for (const savedAgent of saved) {
+          const match = state.agents.find(a => a.name === savedAgent.name && !a.id);
+          if (match) match.id = savedAgent.id;
+        }
+        await loadAgentLibrary();
+        showNotification(`${saved.length} agents saved to library`, 'success');
+      }
+    } catch (err) {
+      console.error('Auto-save agents failed:', err);
+    }
+  }
+
+  // Trigger knowledge accumulation for persistent agents
+  triggerAgentLearning();
+
   saveCurrentSession();
 }
 
@@ -1325,7 +1367,7 @@ async function doSearch(query) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query, provider: state.sidebarSearchProvider })
     });
     const data = await res.json();
 
@@ -1564,7 +1606,9 @@ function exportAsJson() {
     currentRound: state.currentRound,
     goalMeasurement: state.goalMeasurement,
     focusGroupMode: state.focusGroupMode,
-    webSearchEnabled: state.webSearchEnabled,
+    webSearchEnabled: state.searchProvider !== 'none',
+    searchProvider: state.searchProvider,
+    searchCount: state.searchCount,
     summaryGenerated: state.summaryGenerated,
     summary: state.summaryData,
     exportedAt: new Date().toISOString()
@@ -1579,7 +1623,7 @@ function exportAsMarkdown() {
   md += `**Mode:** ${state.focusGroupMode}\n`;
   if (state.goalMeasurement) md += `**Goal:** ${state.goalMeasurement}\n`;
   md += `**Rounds:** ${state.currentRound}/${state.rounds}\n`;
-  md += `**Web Search:** ${state.webSearchEnabled ? 'Enabled' : 'Disabled'}\n\n`;
+  md += `**Web Search:** ${state.searchProvider !== 'none' ? state.searchProvider : 'Disabled'}\n\n`;
   md += `---\n\n## Discussion\n\n`;
 
   for (const msg of state.messages) {
@@ -1651,7 +1695,9 @@ function importSession() {
         state.summaryGenerated = data.summaryGenerated || !!data.summary;
         state.goalMeasurement = data.goalMeasurement || '';
         state.focusGroupMode = data.focusGroupMode || 'share_perspectives';
-        state.webSearchEnabled = data.webSearchEnabled !== false;
+        state.searchProvider = data.searchProvider || (data.webSearchEnabled !== false ? 'openai' : 'none');
+        state.searchCount = data.searchCount || 5;
+        state.webSearchEnabled = state.searchProvider !== 'none';
         state.isRunning = false;
         state.isPaused = false;
         saveCurrentSession();
@@ -1829,11 +1875,92 @@ function signalResume() {
 
 // === Event Listeners ===
 document.addEventListener('DOMContentLoaded', () => {
-  // Load server config (model name)
+  // Load server config (model name + search providers)
   fetch('/api/config').then(r => r.json()).then(cfg => {
     const badge = document.getElementById('modelBadge');
     if (badge) badge.textContent = cfg.model || 'unknown';
+
+    // Populate search provider dropdowns
+    if (cfg.searchProviders) {
+      state.availableProviders = cfg.searchProviders;
+
+      // Main search provider select
+      const mainSelect = document.getElementById('searchProvider');
+      if (mainSelect) {
+        mainSelect.innerHTML = '';
+        for (const p of cfg.searchProviders) {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          if (p.available) {
+            opt.textContent = p.name;
+          } else {
+            opt.textContent = `${p.name} (API key not set)`;
+            opt.disabled = true;
+          }
+          mainSelect.appendChild(opt);
+        }
+        // Set default
+        if (cfg.defaultSearchProvider) {
+          state.searchProvider = cfg.defaultSearchProvider;
+          mainSelect.value = cfg.defaultSearchProvider;
+        }
+        updateSearchCountVisibility();
+        updateSearchProviderHint();
+      }
+
+      // Sidebar search provider select (exclude openai and none)
+      const sidebarSelect = document.getElementById('sidebarSearchProvider');
+      if (sidebarSelect) {
+        sidebarSelect.innerHTML = '';
+        const sidebarProviders = cfg.searchProviders.filter(p => p.id !== 'openai' && p.id !== 'none');
+        if (sidebarProviders.length === 0) {
+          const fallback = cfg.searchProviders.filter(p => p.id !== 'none');
+          for (const p of fallback) {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.available ? p.name : `${p.name} (no key)`;
+            opt.disabled = !p.available;
+            sidebarSelect.appendChild(opt);
+          }
+          state.sidebarSearchProvider = (fallback.find(p => p.available) || fallback[0])?.id || 'brave';
+        } else {
+          for (const p of sidebarProviders) {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.available ? p.name : `${p.name} (no key)`;
+            opt.disabled = !p.available;
+            sidebarSelect.appendChild(opt);
+          }
+          state.sidebarSearchProvider = (sidebarProviders.find(p => p.available) || sidebarProviders[0]).id;
+        }
+        sidebarSelect.value = state.sidebarSearchProvider;
+      }
+    }
   }).catch(() => {});
+
+  // Helper: show/hide search count stepper based on provider
+  function updateSearchCountVisibility() {
+    const group = document.getElementById('searchCountGroup');
+    if (group) {
+      // Hide stepper for OpenAI (AI decides) and none (disabled)
+      const hide = state.searchProvider === 'openai' || state.searchProvider === 'none';
+      group.classList.toggle('hidden', hide);
+    }
+  }
+
+  // Helper: update provider hint text
+  function updateSearchProviderHint() {
+    const hint = document.getElementById('searchProviderHint');
+    if (!hint) return;
+    const hints = {
+      openai: 'AI decides when and what to search (OpenAI Responses API)',
+      exa: 'App pre-searches using Exa.ai, results injected into prompt',
+      firecrawl: 'App pre-searches using Firecrawl, results injected into prompt',
+      brave: 'App pre-searches using Brave, results injected into prompt',
+      none: 'Web search disabled — agents use expertise only'
+    };
+    hint.textContent = hints[state.searchProvider] || '';
+  }
 
   // Populate timezone selector
   const tzSelect = document.getElementById('sessionTimezone');
@@ -1898,10 +2025,18 @@ document.addEventListener('DOMContentLoaded', () => {
     state.goalMeasurement = '';
     state.focusGroupMode = 'share_perspectives';
     state.sessionTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // Reset search provider to default
+    const defaultProvider = state.availableProviders.find(p => p.id !== 'openai' && p.id !== 'none');
+    state.searchProvider = defaultProvider ? defaultProvider.id : 'openai';
+    state.searchCount = 5;
     document.getElementById('topicInput').value = '';
     document.getElementById('goalInput').value = '';
     document.getElementById('focusGroupMode').value = 'share_perspectives';
-    document.getElementById('webSearchToggle').checked = true;
+    const spSel = document.getElementById('searchProvider');
+    if (spSel) spSel.value = state.searchProvider;
+    updateSearchCountVisibility();
+    updateSearchProviderHint();
+    updateSearchCountStepper();
     const tzSel = document.getElementById('sessionTimezone');
     if (tzSel) tzSel.value = state.sessionTimezone;
     document.getElementById('roleEditor').classList.add('hidden');
@@ -1909,9 +2044,31 @@ document.addEventListener('DOMContentLoaded', () => {
     renderSessionList();
   });
 
-  // Web search toggle
-  document.getElementById('webSearchToggle').addEventListener('change', (e) => {
-    state.webSearchEnabled = e.target.checked;
+  // Search provider select
+  document.getElementById('searchProvider').addEventListener('change', (e) => {
+    state.searchProvider = e.target.value;
+    state.webSearchEnabled = e.target.value !== 'none';
+    updateSearchCountVisibility();
+    updateSearchProviderHint();
+  });
+
+  // Search count stepper (3–10)
+  function updateSearchCountStepper() {
+    document.getElementById('searchCountValue').textContent = state.searchCount;
+    document.getElementById('searchCountMinus').disabled = state.searchCount <= 3;
+    document.getElementById('searchCountPlus').disabled = state.searchCount >= 10;
+  }
+  document.getElementById('searchCountMinus').addEventListener('click', () => {
+    if (state.searchCount > 3) { state.searchCount--; updateSearchCountStepper(); }
+  });
+  document.getElementById('searchCountPlus').addEventListener('click', () => {
+    if (state.searchCount < 10) { state.searchCount++; updateSearchCountStepper(); }
+  });
+  updateSearchCountStepper();
+
+  // Sidebar search provider
+  document.getElementById('sidebarSearchProvider').addEventListener('change', (e) => {
+    state.sidebarSearchProvider = e.target.value;
   });
 
   // Agent count stepper (2–5)
@@ -2059,7 +2216,9 @@ document.addEventListener('DOMContentLoaded', () => {
             topic: state.topic,
             messages: state.messages.filter(m => m.type !== 'system'),
             userInterjection: feedback,
-            webSearchEnabled: state.webSearchEnabled,
+            webSearchEnabled: state.searchProvider !== 'none',
+            searchProvider: state.searchProvider,
+            searchCount: state.searchCount,
             goalMeasurement: state.goalMeasurement,
             focusGroupMode: state.focusGroupMode,
             sessionTimezone: state.sessionTimezone
