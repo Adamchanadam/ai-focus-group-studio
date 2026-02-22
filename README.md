@@ -7,7 +7,7 @@
 ### 核心功能
 
 - **AI 焦點小組**：2-10 個 AI Agent，各自擁有獨特姓名、職稱、背景與觀點
-- **預先研究機制**：討論開始前，每個 Agent 並行研究主題（含 Web Search），帶著真實知識和數據進入討論
+- **預先研究機制**：討論開始前，每個 Agent 根據自身角色與專長，由 AI 動態生成搜尋查詢並並行研究主題，帶著真實知識和數據進入討論
 - **Anti-Anchoring（防錨定效應）**：Round 1 各 Agent 獨立發言，不受其他人觀點影響
 - **分階段討論策略**：Round 1 獨立意見 → 中間回合交鋒辯論 → 最終回合敍合結論
 - **三種討論模式**：分享觀點 / 腦力激盪 / 辯論求解
@@ -20,23 +20,23 @@
 - **跨 Session 知識累積**：每次討論結束後，LLM 自動將新學習與舊知識合併濃縮為 `accumulatedInsights`（含日期標記）
 - **Knowledge Provenance（知識溯源）**：自動追蹤每條知識的來源 URL、學習日期、來源主題，Agent 詳情頁可查看完整來源清單
 - **三種面板組合模式**：Generate New（全新生成）/ Pick from Library（從庫中選取）/ Mix（混合搭配）
-- **Save to Library**：Session 中生成的 Agent 可一鍵批量存入 Library
+- **Auto-save to Library**：討論結束後自動將新 Agent 存入 Library（也可手動批量存入）
 - **伺服器端持久化**：Agent 資料存於 `data/agents.json`，原子寫入防止損壞，伺服器重啟不遺失
 - **知識注入**：持久 Agent 的累積知識自動注入 system prompt，使其在後續 Session 中能提供更深入的見解
 
 ### 討論與摘要
 
 - **主持人介入**：討論中可隨時暫停、插話引導方向；討論結束後仍可追問（最多 5 個 Agent 回應）
-- **網路搜尋**：啟用後 Agent 可按需搜尋網路取得即時資料（非每次發言都搜尋）
-- **快速搜尋面板**：側欄獨立搜尋（Brave Search API 或模擬結果）
+- **可插拔式網路搜尋**：支援 OpenAI / Exa.ai / Firecrawl / Brave 四種搜尋提供者，可在 UI 自由切換；外部 provider 成本最低僅 OpenAI 的 1/10
+- **快速搜尋面板**：側欄獨立搜尋，可選擇不同搜尋 provider
 - **引用來源面板**：右側欄自動彙整討論中所有引用連結，標示來源 Agent
-- **自動摘要**：討論結束後生成結構化摘要、關鍵洞察、待辦事項（每 Session 僅限一次）
+- **自動摘要**：討論結束後生成結構化摘要、關鍵洞察、待辦事項；可隨時重開查看
 - **CJK 語言偵測**：自動偵測主題語言，確保 Agent 回應和摘要使用一致語言
 - **Session 時區**：可設定討論時區，Agent 會知道「今天是幾號」，討論標題顯示日期與時區
 
 ### 管理與匯出
 
-- **匯出匯入**：JSON / Markdown 匯出（含完整元資料），JSON 匯入
+- **匯出匯入**：JSON / Markdown 匯出（含完整元資料 + 引用來源清單），JSON 匯入
 - **Session 管理**：瀏覽器 localStorage 自動儲存；伺服器端記憶體同步
 - **暗色主題**：WhatsApp 風格聊天介面，支援桌面、平板、手機響應式佈局
 - **Toast 通知**：所有提示以非阻塞式 Toast 呈現，取代傳統 alert()
@@ -47,7 +47,7 @@
 
 - Node.js >= 18
 - OpenAI API Key（必要）
-- Brave Search API Key（選填，啟用側欄即時搜尋）
+- 搜尋 Provider API Key（選填）：Exa.ai / Firecrawl / Brave，至少設一個即可啟用網路搜尋
 
 ### 安裝與啟動
 
@@ -71,7 +71,9 @@ npm start
 |------|------|--------|------|
 | `OPENAI_API_KEY` | 是 | — | OpenAI API 金鑰 |
 | `OPENAI_MODEL` | 否 | `gpt-5-mini` | 使用的模型名稱（可更換為任何 OpenAI 相容模型，見下方相容性說明） |
-| `BRAVE_SEARCH_API_KEY` | 否 | — | Brave Search API 金鑰（側欄快速搜尋用） |
+| `EXA_API_KEY` | 否 | — | [Exa.ai](https://exa.ai) 搜尋 API 金鑰 |
+| `FIRECRAWL_API_KEY` | 否 | — | [Firecrawl](https://firecrawl.dev) 搜尋 API 金鑰 |
+| `BRAVE_SEARCH_API_KEY` | 否 | — | Brave Search API 金鑰 |
 | `PORT` | 否 | `3001` | 伺服器監聽埠號 |
 
 ### 模型相容性
@@ -85,7 +87,7 @@ npm start
      ↓                                    ↓                                     ↓
  設定目標（選填）              Generate New / Library / Mix     Agent 預先研究主題（並行）
      ↓                                                                          ↓
- 開關網路搜尋 / 設定時區                                      Round 1: 獨立意見（防錨定效應）
+ 選擇搜尋 Provider / 設定時區                                      Round 1: 獨立意見（防錨定效應）
                                                                           ↓
                                                           Round 2+: 交鋒辯論 → 暫停/介入/恢復
                                                                           ↓
@@ -100,21 +102,20 @@ npm start
 2. **選擇模式**：分享觀點 / 腦力激盪 / 辯論求解
 3. **選擇人數與回合**：Agent 2-10 個，回合 1-10 輪
 4. **設定目標**（選填，最多 1000 字）：定義討論成功指標
-5. **網路搜尋**（選填）：啟用後 Agent 可按需搜尋即時資料
+5. **選擇搜尋提供者**（選填）：OpenAI / Exa.ai / Firecrawl / Brave / 停用，可調整每次查詢結果數量
 6. **設定時區**（選填）：預設為瀏覽器時區，Agent 會知道當前日期時間
 7. **選擇面板組合**：
    - **Generate New**：AI 全新生成所有角色
    - **Pick from Library**：從 Agent Library 勾選已保存的 Agent
    - **Mix**：選取部分 Library Agent + AI 自動生成剩餘角色
 8. **生成/選取角色**：角色顯示後可點卡片修改
-9. **Save to Library**（選填）：將新生成的 Agent 批量存入 Library 供未來使用
-10. **開始討論**：Agent 先並行研究主題、形成立場簡報，再進入討論
-11. **Round 1 獨立發言**：每個 Agent 獨立分享觀點，不受他人影響（防錨定效應）
-12. **Round 2+ 交鋒辯論**：Agent 直接點名挑戰對方觀點，引入新證據
-13. **主持人介入**：暫停、插話引導、恢復（支援快速連續多條訊息）
-14. **生成摘要**：一鍵生成結構化摘要和待辦事項
-15. **知識累積**：摘要生成後，持久 Agent 自動進行背景知識合併（含來源 URL 追蹤）
-16. **匯出**：JSON 或 Markdown 格式匯出完整討論記錄
+9. **開始討論**：Agent 先並行研究主題、形成立場簡報，再進入討論
+10. **Round 1 獨立發言**：每個 Agent 獨立分享觀點，不受他人影響（防錨定效應）
+11. **Round 2+ 交鋒辯論**：Agent 直接點名挑戰對方觀點，引入新證據
+12. **主持人介入**：暫停、插話引導、恢復（支援快速連續多條訊息）
+13. **討論結束**：新 Agent 自動存入 Library，知識累積自動觸發
+14. **生成摘要**：一鍵生成結構化摘要和待辦事項（可隨時重開查看）
+15. **匯出**：JSON 或 Markdown 格式匯出完整討論記錄（含引用來源清單）
 
 ## API 端點
 
@@ -123,11 +124,11 @@ npm start
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | GET | `/` | 前端頁面 |
-| GET | `/api/config` | 取得伺服器配置（模型名稱） |
+| GET | `/api/config` | 取得伺服器配置（模型名稱、可用搜尋 providers） |
 | POST | `/api/discuss` | 生成 Agent 角色（支援 `selectedAgentIds` 從 Library 選取，`sessionTimezone` 設定時區） |
 | POST | `/api/agent/prepare` | Agent 預先研究主題、形成立場簡報（含 Web Search） |
 | POST | `/api/agent/respond` | 取得單一 Agent 的串流回應 (SSE)，自動注入累積知識 + 時區日期 |
-| POST | `/api/search` | 網路搜尋（Brave 或模擬） |
+| POST | `/api/search` | 網路搜尋（支援 Exa / Firecrawl / Brave，由 `provider` 參數指定） |
 | POST | `/api/summary` | 生成討論摘要 (SSE)，支援 CJK 語言偵測 |
 | GET | `/api/session/:id` | 取得 Session 資料 |
 | DELETE | `/api/session/:id` | 刪除 Session |
@@ -151,7 +152,7 @@ npm start
 | 後端 | Node.js + Express |
 | 前端 | 原生 HTML / CSS / JavaScript（零框架） |
 | AI 模型 | OpenAI Chat Completions API + Responses API (web_search) |
-| 搜尋 | Brave Search API（選填） |
+| 搜尋 | 可插拔式：Exa.ai / Firecrawl / Brave / OpenAI（選填，0 新 npm 依賴） |
 | 即時通訊 | Server-Sent Events (SSE) |
 | Session 儲存 | 瀏覽器 localStorage + 伺服器記憶體 Map |
 | Agent 持久化 | `data/agents.json`（原子寫入 + 記憶體快取） |
@@ -217,7 +218,7 @@ ai-focus-group-studio/
 
 | 機制 | 說明 |
 |------|------|
-| **預先研究** | 每個 Agent 在討論前用 Web Search 研究主題，形成 4-6 點立場簡報 |
+| **預先研究** | 每個 Agent 在討論前根據自身角色由 AI 動態生成搜尋查詢，帶著差異化的真實數據形成立場簡報 |
 | **Anti-Anchoring** | Round 1 過濾掉其他 Agent 的訊息，每人只看到主題獨立發言 |
 | **分階段策略** | Round 1 獨立意見 → 中間回合交鋒 → 最終回合敍合結論 |
 | **人性化語氣** | 要求分享個人經歷、真實情緒反應、直接點名挑戰，禁止企業術語 |
