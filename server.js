@@ -516,7 +516,7 @@ You are preparing for a focus group discussion. Research the topic thoroughly us
       const response = await client.chat.completions.create({
         model: OPENAI_MODEL,
         max_completion_tokens: 600,
-        temperature: 0.9,
+        // temperature removed — gpt-5-mini only supports default (1)
         messages: [
           {
             role: 'system',
@@ -794,7 +794,7 @@ app.post('/api/summary', async (req, res) => {
     const stream = await client.chat.completions.create({
       model: OPENAI_MODEL,
       max_completion_tokens: 4096,
-      temperature: 0.7,
+      // temperature removed — gpt-5-mini only supports default (1)
       store: false,
       stream: true,
       messages: [
@@ -962,7 +962,7 @@ app.post('/api/agents/:id/learn', async (req, res) => {
     const response = await client.chat.completions.create({
       model: OPENAI_MODEL,
       max_completion_tokens: 600,
-      temperature: 0.5,
+      // temperature removed — gpt-5-mini only supports default (1)
       messages: [
         { role: 'system', content: 'You are a knowledge management assistant. Merge and condense expertise summaries. Respond with the merged text only, no JSON or markdown.' },
         { role: 'user', content: mergePrompt }

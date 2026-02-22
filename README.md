@@ -70,9 +70,13 @@ npm start
 | 變數 | 必填 | 預設值 | 說明 |
 |------|------|--------|------|
 | `OPENAI_API_KEY` | 是 | — | OpenAI API 金鑰 |
-| `OPENAI_MODEL` | 否 | `gpt-5-mini` | 使用的模型名稱（可更換為任何相容模型） |
+| `OPENAI_MODEL` | 否 | `gpt-5-mini` | 使用的模型名稱（可更換為任何 OpenAI 相容模型，見下方相容性說明） |
 | `BRAVE_SEARCH_API_KEY` | 否 | — | Brave Search API 金鑰（側欄快速搜尋用） |
 | `PORT` | 否 | `3001` | 伺服器監聽埠號 |
+
+### 模型相容性
+
+所有 OpenAI API 呼叫均使用模型預設 temperature（不傳自訂值），確保與 `gpt-5-mini` 等僅支援 `temperature=1` 的模型相容。如需切換模型，只需修改 `OPENAI_MODEL` 環境變數即可。
 
 ## 使用流程
 

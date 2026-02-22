@@ -1,6 +1,6 @@
 # AI Focus Group Studio — 技術文件
 
-**版本**：3.0
+**版本**：3.1
 **更新日期**：2026-02-22
 
 ---
@@ -192,6 +192,8 @@ data: {"type":"error","error":"錯誤訊息"}
 **兩種呼叫路徑**：
 - `webSearchEnabled = true`：使用 OpenAI Responses API + `web_search` 工具
 - `webSearchEnabled = false`：使用 OpenAI Chat Completions API
+
+**Temperature**：所有 API 呼叫均使用模型預設 temperature（不傳自訂值），確保與 `gpt-5-mini` 等僅支援預設 temperature 的模型相容。
 
 ### 3.5 `POST /api/search`
 
@@ -668,4 +670,4 @@ if (!hasInlineCitations) { /* 顯示搜尋卡片 */ }
 
 ---
 
-*技術文件版本：3.0*
+*技術文件版本：3.1*
